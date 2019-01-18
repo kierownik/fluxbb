@@ -27,7 +27,7 @@ if (!$pun_user['is_guest'])
 else
 	$result = $db->query('SELECT f.forum_name, f.redirect_url, f.moderators, f.num_topics, f.sort_by, fp.post_topics, 0 AS is_subscribed FROM '.$db->prefix.'forums AS f LEFT JOIN '.$db->prefix.'forum_perms AS fp ON (fp.forum_id=f.id AND fp.group_id='.$pun_user['g_id'].') WHERE (fp.read_forum IS NULL OR fp.read_forum=1) AND f.id='.$id) or error('Unable to fetch forum info', __FILE__, __LINE__, $db->error());
 
-if (!$db->num_rows($result))
+if (!$db->has_rows($result))
 	message($lang_common['Bad request'], false, '404 Not Found');
 
 $cur_forum = $db->fetch_assoc($result);
@@ -78,24 +78,38 @@ $start_from = $pun_user['disp_topics'] * ($p - 1);
 // Generate paging links
 $paging_links = '<span class="pages-label">'.$lang_common['Pages'].' </span>'.paginate($num_pages, $p, 'viewforum.php?id='.$id);
 
+// Add relationship meta tags
+$page_head = array();
+$page_head['canonical'] = '<link rel="canonical" href="viewforum.php?id='.$id.($p == 1 ? '' : '&amp;p='.$p).'" title="'.sprintf($lang_common['Page'], $p).'" />';
+
+if ($num_pages > 1)
+{
+	if ($p > 1)
+		$page_head['prev'] = '<link rel="prev" href="viewforum.php?id='.$id.($p == 2 ? '' : '&amp;p='.($p - 1)).'" title="'.sprintf($lang_common['Page'], $p - 1).'" />';
+	if ($p < $num_pages)
+		$page_head['next'] = '<link rel="next" href="viewforum.php?id='.$id.'&amp;p='.($p + 1).'" title="'.sprintf($lang_common['Page'], $p + 1).'" />';
+}
+
 if ($pun_config['o_feed_type'] == '1')
-	$page_head = array('feed' => '<link rel="alternate" type="application/rss+xml" href="extern.php?action=feed&amp;fid='.$id.'&amp;type=rss" title="'.$lang_common['RSS forum feed'].'" />');
+	$page_head['feed'] = '<link rel="alternate" type="application/rss+xml" href="extern.php?action=feed&amp;fid='.$id.'&amp;type=rss" title="'.$lang_common['RSS forum feed'].'" />';
 else if ($pun_config['o_feed_type'] == '2')
-	$page_head = array('feed' => '<link rel="alternate" type="application/atom+xml" href="extern.php?action=feed&amp;fid='.$id.'&amp;type=atom" title="'.$lang_common['Atom forum feed'].'" />');
+	$page_head['feed'] = '<link rel="alternate" type="application/atom+xml" href="extern.php?action=feed&amp;fid='.$id.'&amp;type=atom" title="'.$lang_common['Atom forum feed'].'" />';
 
 $forum_actions = array();
 
 if (!$pun_user['is_guest'])
 {
+	$token_url = '&amp;csrf_token='.pun_csrf_token();
+
 	if ($pun_config['o_forum_subscriptions'] == '1')
 	{
 		if ($cur_forum['is_subscribed'])
-			$forum_actions[] = '<span>'.$lang_forum['Is subscribed'].' - </span><a href="misc.php?action=unsubscribe&amp;fid='.$id.'">'.$lang_forum['Unsubscribe'].'</a>';
+			$forum_actions[] = '<span>'.$lang_forum['Is subscribed'].' - </span><a id="unsubscribe" href="misc.php?action=unsubscribe&amp;fid='.$id.$token_url.'">'.$lang_forum['Unsubscribe'].'</a>';
 		else
-			$forum_actions[] = '<a href="misc.php?action=subscribe&amp;fid='.$id.'">'.$lang_forum['Subscribe'].'</a>';
+			$forum_actions[] = '<a href="misc.php?action=subscribe&amp;fid='.$id.$token_url.'">'.$lang_forum['Subscribe'].'</a>';
 	}
 
-	$forum_actions[] = '<a href="misc.php?action=markforumread&amp;fid='.$id.'">'.$lang_common['Mark forum read'].'</a>';
+	$forum_actions[] = '<a href="misc.php?action=markforumread&amp;fid='.$id.$token_url.'">'.$lang_common['Mark forum read'].'</a>';
 }
 
 $page_title = array(pun_htmlspecialchars($pun_config['o_board_title']), pun_htmlspecialchars($cur_forum['forum_name']));
@@ -122,7 +136,7 @@ require PUN_ROOT.'header.php';
 	<h2><span><?php echo pun_htmlspecialchars($cur_forum['forum_name']) ?></span></h2>
 	<div class="box">
 		<div class="inbox">
-			<table cellspacing="0">
+			<table>
 			<thead>
 				<tr>
 					<th class="tcl" scope="col"><?php echo $lang_common['Topic'] ?></th>
@@ -138,14 +152,11 @@ require PUN_ROOT.'header.php';
 $result = $db->query('SELECT id FROM '.$db->prefix.'topics WHERE forum_id='.$id.' ORDER BY sticky DESC, '.$sort_by.', id DESC LIMIT '.$start_from.', '.$pun_user['disp_topics']) or error('Unable to fetch topic IDs', __FILE__, __LINE__, $db->error());
 
 // If there are topics in this forum
-if ($db->num_rows($result))
+if ($db->has_rows($result))
 {
 	$topic_ids = array();
-	for ($i = 0;$cur_topic_id = $db->result($result, $i);$i++)
+	for ($i = 0; $cur_topic_id = $db->result($result, $i); $i++)
 		$topic_ids[] = $cur_topic_id;
-
-	if (empty($topic_ids))
-		error('The topic table and forum table seem to be out of sync!', __FILE__, __LINE__);
 
 	// Fetch list of topics to display on this page
 	if ($pun_user['is_guest'] || $pun_config['o_show_dot'] == '0')

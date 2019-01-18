@@ -26,6 +26,10 @@ $action = isset($_REQUEST['action']) ? pun_trim($_REQUEST['action']) : '';
 
 if ($action == 'rebuild')
 {
+	confirm_referrer('admin_maintenance.php');
+
+	check_csrf($_GET['csrf_token']);
+
 	$per_page = isset($_GET['i_per_page']) ? intval($_GET['i_per_page']) : 0;
 	$start_at = isset($_GET['i_start_at']) ? intval($_GET['i_start_at']) : 0;
 
@@ -38,9 +42,6 @@ if ($action == 'rebuild')
 	// If this is the first cycle of posts we empty the search index before we proceed
 	if (isset($_GET['i_empty_index']))
 	{
-		// This is the only potentially "dangerous" thing we can do here, so we check the referer
-		confirm_referrer('admin_maintenance.php');
-
 		$db->truncate_table('search_matches') or error('Unable to empty search index match table', __FILE__, __LINE__, $db->error());
 		$db->truncate_table('search_words') or error('Unable to empty search index words table', __FILE__, __LINE__, $db->error());
 
@@ -113,14 +114,14 @@ h1 {
 	{
 		$result = $db->query('SELECT id FROM '.$db->prefix.'posts WHERE id > '.$end_at.' ORDER BY id ASC LIMIT 1') or error('Unable to fetch next ID', __FILE__, __LINE__, $db->error());
 
-		if ($db->num_rows($result) > 0)
-			$query_str = '?action=rebuild&i_per_page='.$per_page.'&i_start_at='.$db->result($result);
+		if ($db->has_rows($result))
+			$query_str = '?action=rebuild&csrf_token='.pun_csrf_token().'&i_per_page='.$per_page.'&i_start_at='.$db->result($result);
 	}
 
 	$db->end_transaction();
 	$db->close();
 
-	exit('<script type="text/javascript">window.location="admin_maintenance.php'.$query_str.'"</script><hr /><p>'.sprintf($lang_admin_maintenance['Javascript redirect failed'], '<a href="admin_maintenance.php'.$query_str.'">'.$lang_admin_maintenance['Click here'].'</a>').'</p>');
+	exit('<meta http-equiv="refresh" content="0;url=admin_maintenance.php'.$query_str.'" /><hr /><p>'.sprintf($lang_admin_maintenance['Javascript redirect failed'], '<a href="admin_maintenance.php'.$query_str.'">'.$lang_admin_maintenance['Click here'].'</a>').'</p>');
 }
 
 if ($action == 'prune')
@@ -140,14 +141,11 @@ if ($action == 'prune')
 		if ($prune_from == 'all')
 		{
 			$result = $db->query('SELECT id FROM '.$db->prefix.'forums') or error('Unable to fetch forum list', __FILE__, __LINE__, $db->error());
-			$num_forums = $db->num_rows($result);
 
-			for ($i = 0; $i < $num_forums; ++$i)
+			while ($cur_forum = $db->fetch_assoc())
 			{
-				$fid = $db->result($result, $i);
-
-				prune($fid, $prune_sticky, $prune_date);
-				update_forum($fid);
+				prune($cur_forum['id'], $prune_sticky, $prune_date);
+				update_forum($cur_forum['id']);
 			}
 		}
 		else
@@ -159,15 +157,12 @@ if ($action == 'prune')
 
 		// Locate any "orphaned redirect topics" and delete them
 		$result = $db->query('SELECT t1.id FROM '.$db->prefix.'topics AS t1 LEFT JOIN '.$db->prefix.'topics AS t2 ON t1.moved_to=t2.id WHERE t2.id IS NULL AND t1.moved_to IS NOT NULL') or error('Unable to fetch redirect topics', __FILE__, __LINE__, $db->error());
-		$num_orphans = $db->num_rows($result);
 
-		if ($num_orphans)
-		{
-			for ($i = 0; $i < $num_orphans; ++$i)
-				$orphans[] = $db->result($result, $i);
+		while ($cur_topic = $db->fetch_assoc($result))
+			$orphans[] = $cur_topic['id'];
 
+		if (!empty($orphans))
 			$db->query('DELETE FROM '.$db->prefix.'topics WHERE id IN('.implode(',', $orphans).')') or error('Unable to delete redirect topics', __FILE__, __LINE__, $db->error());
-		}
 
 		redirect('admin_maintenance.php', $lang_admin_maintenance['Posts pruned redirect']);
 	}
@@ -242,7 +237,7 @@ if ($action == 'prune')
 
 // Get the first post ID from the db
 $result = $db->query('SELECT id FROM '.$db->prefix.'posts ORDER BY id ASC LIMIT 1') or error('Unable to fetch topic info', __FILE__, __LINE__, $db->error());
-if ($db->num_rows($result))
+if ($db->has_rows($result))
 	$first_id = $db->result($result);
 
 $page_title = array(pun_htmlspecialchars($pun_config['o_board_title']), $lang_admin_common['Admin'], $lang_admin_common['Maintenance']);
@@ -258,11 +253,12 @@ generate_admin_menu('maintenance');
 			<form method="get" action="admin_maintenance.php">
 				<div class="inform">
 					<input type="hidden" name="action" value="rebuild" />
+					<input type="hidden" name="csrf_token" value="<?php echo pun_csrf_token() ?>" />
 					<fieldset>
 						<legend><?php echo $lang_admin_maintenance['Rebuild index subhead'] ?></legend>
 						<div class="infldset">
 							<p><?php printf($lang_admin_maintenance['Rebuild index info'], '<a href="admin_options.php#maintenance">'.$lang_admin_common['Maintenance mode'].'</a>') ?></p>
-							<table class="aligntop" cellspacing="0">
+							<table class="aligntop">
 								<tr>
 									<th scope="row"><?php echo $lang_admin_maintenance['Posts per cycle label'] ?></th>
 									<td>
@@ -297,7 +293,7 @@ generate_admin_menu('maintenance');
 					<fieldset>
 						<legend><?php echo $lang_admin_maintenance['Prune subhead'] ?></legend>
 						<div class="infldset">
-							<table class="aligntop" cellspacing="0">
+							<table class="aligntop">
 								<tr>
 									<th scope="row"><?php echo $lang_admin_maintenance['Days old label'] ?></th>
 									<td>

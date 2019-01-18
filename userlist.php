@@ -35,7 +35,7 @@ $where_sql = array();
 $like_command = ($db_type == 'pgsql') ? 'ILIKE' : 'LIKE';
 
 if ($username != '')
-	$where_sql[] = 'u.username '.$like_command.' \''.$db->escape(str_replace('*', '%', $username)).'\'';
+	$where_sql[] = 'u.username '.$like_command.' \''.$db->escape(str_replace(array('*', '_',), array('%', '\\_'), $username)).'\'';
 if ($show_group > -1)
 	$where_sql[] = 'u.group_id='.$show_group;
 
@@ -122,7 +122,7 @@ while ($cur_group = $db->fetch_assoc($result))
 	<h2><span><?php echo $lang_common['User list'] ?></span></h2>
 	<div class="box">
 		<div class="inbox">
-			<table cellspacing="0">
+			<table>
 			<thead>
 				<tr>
 					<th class="tcl" scope="col"><?php echo $lang_common['Username'] ?></th>
@@ -137,7 +137,7 @@ while ($cur_group = $db->fetch_assoc($result))
 // Retrieve a list of user IDs, LIMIT is (really) expensive so we only fetch the IDs here then later fetch the remaining data
 $result = $db->query('SELECT u.id FROM '.$db->prefix.'users AS u WHERE u.id>1 AND u.group_id!='.PUN_UNVERIFIED.(!empty($where_sql) ? ' AND '.implode(' AND ', $where_sql) : '').' ORDER BY '.$sort_by.' '.$sort_dir.', u.id ASC LIMIT '.$start_from.', 50') or error('Unable to fetch user IDs', __FILE__, __LINE__, $db->error());
 
-if ($db->num_rows($result))
+if ($db->has_rows($result))
 {
 	$user_ids = array();
 	for ($i = 0;$cur_user_id = $db->result($result, $i);$i++)

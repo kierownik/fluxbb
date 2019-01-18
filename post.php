@@ -25,7 +25,7 @@ if ($tid)
 else
 	$result = $db->query('SELECT f.id, f.forum_name, f.moderators, f.redirect_url, fp.post_replies, fp.post_topics FROM '.$db->prefix.'forums AS f LEFT JOIN '.$db->prefix.'forum_perms AS fp ON (fp.forum_id=f.id AND fp.group_id='.$pun_user['g_id'].') WHERE (fp.read_forum IS NULL OR fp.read_forum=1) AND f.id='.$fid) or error('Unable to fetch forum info', __FILE__, __LINE__, $db->error());
 
-if (!$db->num_rows($result))
+if (!$db->has_rows($result))
 	message($lang_common['Bad request'], false, '404 Not Found');
 
 $cur_posting = $db->fetch_assoc($result);
@@ -59,26 +59,40 @@ $errors = array();
 // Did someone just hit "Submit" or "Preview"?
 if (isset($_POST['form_sent']))
 {
+	flux_hook('post_before_validation');
+
 	// Flood protection
 	if (!isset($_POST['preview']) && $pun_user['last_post'] != '' && (time() - $pun_user['last_post']) < $pun_user['g_post_flood'])
 		$errors[] = sprintf($lang_post['Flood start'], $pun_user['g_post_flood'], $pun_user['g_post_flood'] - (time() - $pun_user['last_post']));
+
+	// Make sure they got here from the site
+	confirm_referrer(array('post.php', 'viewtopic.php'));
 
 	// If it's a new topic
 	if ($fid)
 	{
 		$subject = pun_trim($_POST['req_subject']);
 
-		if ($pun_config['o_censoring'] == '1')
-			$censored_subject = pun_trim(censor_words($subject));
-
 		if ($subject == '')
 			$errors[] = $lang_post['No subject'];
-		else if ($pun_config['o_censoring'] == '1' && $censored_subject == '')
-			$errors[] = $lang_post['No subject after censoring'];
-		else if (pun_strlen($subject) > 70)
-			$errors[] = $lang_post['Too long subject'];
-		else if ($pun_config['p_subject_all_caps'] == '0' && is_all_uppercase($subject) && !$pun_user['is_admmod'])
-			$errors[] = $lang_post['All caps subject'];
+		else if ($pun_config['o_censoring'] == '1')
+		{
+			// Censor subject to see if that causes problems
+			$subject = pun_trim(censor_words($subject));
+
+			if ($subject == '')
+				$errors[] = $lang_post['No subject after censoring'];
+		}
+
+		if (empty($errors))
+		{
+			if (pun_strlen($subject) > 70)
+				$errors[] = $lang_post['Too long subject'];
+			else if ($pun_config['p_subject_all_caps'] == '0' && is_all_uppercase($subject) && !$pun_user['is_admmod'])
+				$errors[] = $lang_post['All caps subject'];
+			else if ($pun_user['g_post_links'] != '1' && preg_match('%(?:h\s*t|f)\s*t\s*p\s*(?:s\s*)?:\s*/\s*/%', $subject))
+				$errors[] = $lang_common['BBCode error tag url not allowed'];
+		}
 	}
 
 	// If the user is logged in we get the username and email from $pun_user
@@ -142,9 +156,9 @@ if (isset($_POST['form_sent']))
 		else if ($pun_config['o_censoring'] == '1')
 		{
 			// Censor message to see if that causes problems
-			$censored_message = pun_trim(censor_words($message));
+			$message = pun_trim(censor_words($message));
 
-			if ($censored_message == '')
+			if ($message == '')
 				$errors[] = $lang_post['No message after censoring'];
 		}
 	}
@@ -157,6 +171,8 @@ if (isset($_POST['form_sent']))
 	$message = strip_bad_multibyte_chars($message);
 
 	$now = time();
+
+	flux_hook('post_after_validation');
 
 	// Did everything go according to plan?
 	if (empty($errors) && !isset($_POST['preview']))
@@ -207,20 +223,21 @@ if (isset($_POST['form_sent']))
 
 				// Get any subscribed users that should be notified (banned users are excluded)
 				$result = $db->query('SELECT u.id, u.email, u.notify_with_post, u.language FROM '.$db->prefix.'users AS u INNER JOIN '.$db->prefix.'topic_subscriptions AS s ON u.id=s.user_id LEFT JOIN '.$db->prefix.'forum_perms AS fp ON (fp.forum_id='.$cur_posting['id'].' AND fp.group_id=u.group_id) LEFT JOIN '.$db->prefix.'online AS o ON u.id=o.user_id LEFT JOIN '.$db->prefix.'bans AS b ON u.username=b.username WHERE b.username IS NULL AND COALESCE(o.logged, u.last_visit)>'.$previous_post_time.' AND (fp.read_forum IS NULL OR fp.read_forum=1) AND s.topic_id='.$tid.' AND u.id!='.$pun_user['id']) or error('Unable to fetch subscription info', __FILE__, __LINE__, $db->error());
-				if ($db->num_rows($result))
+				if ($db->has_rows($result))
 				{
 					require_once PUN_ROOT.'include/email.php';
 
 					$notification_emails = array();
+					$languages = forum_list_langs();
 
-					if ($pun_config['o_censoring'] == '1')
-						$cleaned_message = bbcode2email($censored_message, -1);
-					else
-						$cleaned_message = bbcode2email($message, -1);
+					$cleaned_message = bbcode2email($message, -1);
 
 					// Loop through subscribed users and send emails
 					while ($cur_subscriber = $db->fetch_assoc($result))
 					{
+						if (!in_array($cur_subscriber['language'], $languages))
+							$cur_subscriber['language'] = $pun_config['o_default_lang'];
+
 						// Is the subscription email for $cur_subscriber['language'] cached or not?
 						if (!isset($notification_emails[$cur_subscriber['language']]))
 						{
@@ -245,7 +262,7 @@ if (isset($_POST['form_sent']))
 								$mail_message = str_replace('<topic_subject>', $cur_posting['subject'], $mail_message);
 								$mail_message = str_replace('<replier>', $username, $mail_message);
 								$mail_message = str_replace('<post_url>', get_base_url().'/viewtopic.php?pid='.$new_pid.'#p'.$new_pid, $mail_message);
-								$mail_message = str_replace('<unsubscribe_url>', get_base_url().'/misc.php?action=unsubscribe&tid='.$tid, $mail_message);
+								$mail_message = str_replace('<unsubscribe_url>', get_base_url().'/viewtopic.php?id='.$tid.'#unsubscribe', $mail_message);
 								$mail_message = str_replace('<board_mailer>', $pun_config['o_board_title'], $mail_message);
 
 								$mail_subject_full = str_replace('<topic_subject>', $cur_posting['subject'], $mail_subject_full);
@@ -253,7 +270,7 @@ if (isset($_POST['form_sent']))
 								$mail_message_full = str_replace('<replier>', $username, $mail_message_full);
 								$mail_message_full = str_replace('<message>', $cleaned_message, $mail_message_full);
 								$mail_message_full = str_replace('<post_url>', get_base_url().'/viewtopic.php?pid='.$new_pid.'#p'.$new_pid, $mail_message_full);
-								$mail_message_full = str_replace('<unsubscribe_url>', get_base_url().'/misc.php?action=unsubscribe&tid='.$tid, $mail_message_full);
+								$mail_message_full = str_replace('<unsubscribe_url>', get_base_url().'/viewtopic.php?id='.$tid.'#unsubscribe', $mail_message_full);
 								$mail_message_full = str_replace('<board_mailer>', $pun_config['o_board_title'], $mail_message_full);
 
 								$notification_emails[$cur_subscriber['language']][0] = $mail_subject;
@@ -315,20 +332,21 @@ if (isset($_POST['form_sent']))
 			{
 				// Get any subscribed users that should be notified (banned users are excluded)
 				$result = $db->query('SELECT u.id, u.email, u.notify_with_post, u.language FROM '.$db->prefix.'users AS u INNER JOIN '.$db->prefix.'forum_subscriptions AS s ON u.id=s.user_id LEFT JOIN '.$db->prefix.'forum_perms AS fp ON (fp.forum_id='.$cur_posting['id'].' AND fp.group_id=u.group_id) LEFT JOIN '.$db->prefix.'bans AS b ON u.username=b.username WHERE b.username IS NULL AND (fp.read_forum IS NULL OR fp.read_forum=1) AND s.forum_id='.$cur_posting['id'].' AND u.id!='.$pun_user['id']) or error('Unable to fetch subscription info', __FILE__, __LINE__, $db->error());
-				if ($db->num_rows($result))
+				if ($db->has_rows($result))
 				{
 					require_once PUN_ROOT.'include/email.php';
 
 					$notification_emails = array();
+					$languages = forum_list_langs();
 
-					if ($pun_config['o_censoring'] == '1')
-						$cleaned_message = bbcode2email($censored_message, -1);
-					else
-						$cleaned_message = bbcode2email($message, -1);
+					$cleaned_message = bbcode2email($message, -1);
 
 					// Loop through subscribed users and send emails
 					while ($cur_subscriber = $db->fetch_assoc($result))
 					{
+						if (!in_array($cur_subscriber['language'], $languages))
+							$cur_subscriber['language'] = $pun_config['o_default_lang'];
+
 						// Is the subscription email for $cur_subscriber['language'] cached or not?
 						if (!isset($notification_emails[$cur_subscriber['language']]))
 						{
@@ -350,20 +368,20 @@ if (isset($_POST['form_sent']))
 								$mail_message_full = trim(substr($mail_tpl_full, $first_crlf));
 
 								$mail_subject = str_replace('<forum_name>', $cur_posting['forum_name'], $mail_subject);
-								$mail_message = str_replace('<topic_subject>', $pun_config['o_censoring'] == '1' ? $censored_subject : $subject, $mail_message);
+								$mail_message = str_replace('<topic_subject>', $subject, $mail_message);
 								$mail_message = str_replace('<forum_name>', $cur_posting['forum_name'], $mail_message);
 								$mail_message = str_replace('<poster>', $username, $mail_message);
 								$mail_message = str_replace('<topic_url>', get_base_url().'/viewtopic.php?id='.$new_tid, $mail_message);
-								$mail_message = str_replace('<unsubscribe_url>', get_base_url().'/misc.php?action=unsubscribe&fid='.$cur_posting['id'], $mail_message);
+								$mail_message = str_replace('<unsubscribe_url>', get_base_url().'/viewforum.php?id='.$cur_posting['id'].'#unsubscribe', $mail_message);
 								$mail_message = str_replace('<board_mailer>', $pun_config['o_board_title'], $mail_message);
 
 								$mail_subject_full = str_replace('<forum_name>', $cur_posting['forum_name'], $mail_subject_full);
-								$mail_message_full = str_replace('<topic_subject>', $pun_config['o_censoring'] == '1' ? $censored_subject : $subject, $mail_message_full);
+								$mail_message_full = str_replace('<topic_subject>', $subject, $mail_message_full);
 								$mail_message_full = str_replace('<forum_name>', $cur_posting['forum_name'], $mail_message_full);
 								$mail_message_full = str_replace('<poster>', $username, $mail_message_full);
 								$mail_message_full = str_replace('<message>', $cleaned_message, $mail_message_full);
 								$mail_message_full = str_replace('<topic_url>', get_base_url().'/viewtopic.php?id='.$new_tid, $mail_message_full);
-								$mail_message_full = str_replace('<unsubscribe_url>', get_base_url().'/misc.php?action=unsubscribe&fid='.$cur_posting['id'], $mail_message_full);
+								$mail_message_full = str_replace('<unsubscribe_url>', get_base_url().'/viewforum.php?id='.$cur_posting['id'].'#unsubscribe', $mail_message_full);
 								$mail_message_full = str_replace('<board_mailer>', $pun_config['o_board_title'], $mail_message_full);
 
 								$notification_emails[$cur_subscriber['language']][0] = $mail_subject;
@@ -450,7 +468,7 @@ if ($tid)
 			message($lang_common['Bad request'], false, '404 Not Found');
 
 		$result = $db->query('SELECT poster, message FROM '.$db->prefix.'posts WHERE id='.$qid.' AND topic_id='.$tid) or error('Unable to fetch quote info', __FILE__, __LINE__, $db->error());
-		if (!$db->num_rows($result))
+		if (!$db->has_rows($result))
 			message($lang_common['Bad request'], false, '404 Not Found');
 
 		list($q_poster, $q_message) = $db->fetch_row($result);
@@ -538,6 +556,8 @@ else
 	$focus_element[] = 'req_username';
 }
 
+flux_hook('post_before_header');
+
 define('PUN_ACTIVE_PAGE', 'index');
 require PUN_ROOT.'header.php';
 
@@ -550,9 +570,7 @@ require PUN_ROOT.'header.php';
 <?php if (isset($_POST['req_subject'])): ?>			<li><span>»&#160;</span><?php echo pun_htmlspecialchars($_POST['req_subject']) ?></li>
 <?php endif; ?>
 <?php if (isset($cur_posting['subject'])): ?>			<li><span>»&#160;</span><a href="viewtopic.php?id=<?php echo $tid ?>"><?php echo pun_htmlspecialchars($cur_posting['subject']) ?></a></li>
-<?php endif; ?>
-<?php if (!isset($_POST['req_subject'])): ?>			<li><span>»&#160;</span><strong><?php echo $action ?></strong></li>
-<?php endif; ?>
+<?php endif; ?>			<li><span>»&#160;</span><strong><?php echo $action ?></strong></li>
 		</ul>
 	</div>
 </div>
@@ -637,7 +655,7 @@ if ($pun_user['is_guest'])
 }
 
 if ($fid): ?>
-						<label class="required"><strong><?php echo $lang_common['Subject'] ?> <span><?php echo $lang_common['Required'] ?></span></strong><br /><input class="longinput" type="text" name="req_subject" value="<?php if (isset($_POST['req_subject'])) echo pun_htmlspecialchars($subject); ?>" size="80" maxlength="70" tabindex="<?php echo $cur_index++ ?>" /><br /></label>
+						<label class="required"><strong><?php echo $lang_common['Subject'] ?> <span><?php echo $lang_common['Required'] ?></span></strong><br /><input class="longinput" type="text" name="req_subject" value="<?php if (isset($_POST['req_subject'])) echo pun_htmlspecialchars($_POST['req_subject']); ?>" size="80" maxlength="70" tabindex="<?php echo $cur_index++ ?>" /><br /></label>
 <?php endif; ?>						<label class="required"><strong><?php echo $lang_common['Message'] ?> <span><?php echo $lang_common['Required'] ?></span></strong><br />
 						<textarea name="req_message" rows="20" cols="95" tabindex="<?php echo $cur_index++ ?>"><?php echo isset($_POST['req_message']) ? pun_htmlspecialchars($orig_message) : (isset($quote) ? $quote : ''); ?></textarea><br /></label>
 						<ul class="bblinks">
@@ -699,6 +717,7 @@ if (!empty($checkboxes))
 
 ?>
 			</div>
+<?php flux_hook('post_before_submit') ?>
 			<p class="buttons"><input type="submit" name="submit" value="<?php echo $lang_common['Submit'] ?>" tabindex="<?php echo $cur_index++ ?>" accesskey="s" /> <input type="submit" name="preview" value="<?php echo $lang_post['Preview'] ?>" tabindex="<?php echo $cur_index++ ?>" accesskey="p" /> <a href="javascript:history.go(-1)"><?php echo $lang_common['Go back'] ?></a></p>
 		</form>
 	</div>

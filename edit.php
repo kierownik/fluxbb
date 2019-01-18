@@ -20,7 +20,7 @@ if ($id < 1)
 
 // Fetch some info about the post, the topic and the forum
 $result = $db->query('SELECT f.id AS fid, f.forum_name, f.moderators, f.redirect_url, fp.post_replies, fp.post_topics, t.id AS tid, t.subject, t.posted, t.first_post_id, t.sticky, t.closed, p.poster, p.poster_id, p.message, p.hide_smilies FROM '.$db->prefix.'posts AS p INNER JOIN '.$db->prefix.'topics AS t ON t.id=p.topic_id INNER JOIN '.$db->prefix.'forums AS f ON f.id=t.forum_id LEFT JOIN '.$db->prefix.'forum_perms AS fp ON (fp.forum_id=f.id AND fp.group_id='.$pun_user['g_id'].') WHERE (fp.read_forum IS NULL OR fp.read_forum=1) AND p.id='.$id) or error('Unable to fetch post info', __FILE__, __LINE__, $db->error());
-if (!$db->num_rows($result))
+if (!$db->has_rows($result))
 	message($lang_common['Bad request'], false, '404 Not Found');
 
 $cur_post = $db->fetch_assoc($result);
@@ -56,8 +56,8 @@ $errors = array();
 
 if (isset($_POST['form_sent']))
 {
-	if ($is_admmod)
-		confirm_referrer('edit.php');
+	// Make sure they got here from the site
+	confirm_referrer('edit.php');
 
 	// If it's a topic it must contain a subject
 	if ($can_edit_subject)
@@ -75,6 +75,8 @@ if (isset($_POST['form_sent']))
 			$errors[] = $lang_post['Too long subject'];
 		else if ($pun_config['p_subject_all_caps'] == '0' && is_all_uppercase($subject) && !$pun_user['is_admmod'])
 			$errors[] = $lang_post['All caps subject'];
+		else if ($pun_user['g_post_links'] != '1' && preg_match('%(?:h\s*t|f)\s*t\s*p\s*(?:s\s*)?:\s*/\s*/%', $subject))
+			$errors[] = $lang_common['BBCode error tag url not allowed'];
 	}
 
 	// Clean up message from POST
@@ -240,7 +242,7 @@ else if (isset($_POST['preview']))
 $checkboxes = array();
 if ($can_edit_subject && $is_admmod)
 {
-	if (isset($_POST['stick_topic']) || $cur_post['sticky'] == '1')
+	if (isset($_POST['stick_topic']) || !isset($_POST['form_sent']) && $cur_post['sticky'] == '1')
 		$checkboxes[] = '<label><input type="checkbox" name="stick_topic" value="1" checked="checked" tabindex="'.($cur_index++).'" />'.$lang_common['Stick topic'].'<br /></label>';
 	else
 		$checkboxes[] = '<label><input type="checkbox" name="stick_topic" value="1" tabindex="'.($cur_index++).'" />'.$lang_common['Stick topic'].'<br /></label>';
@@ -248,7 +250,7 @@ if ($can_edit_subject && $is_admmod)
 
 if ($pun_config['o_smilies'] == '1')
 {
-	if (isset($_POST['hide_smilies']) || $cur_post['hide_smilies'] == '1')
+	if (isset($_POST['hide_smilies']) || !isset($_POST['form_sent']) && $cur_post['hide_smilies'] == '1')
 		$checkboxes[] = '<label><input type="checkbox" name="hide_smilies" value="1" checked="checked" tabindex="'.($cur_index++).'" />'.$lang_post['Hide smilies'].'<br /></label>';
 	else
 		$checkboxes[] = '<label><input type="checkbox" name="hide_smilies" value="1" tabindex="'.($cur_index++).'" />'.$lang_post['Hide smilies'].'<br /></label>';
@@ -256,7 +258,7 @@ if ($pun_config['o_smilies'] == '1')
 
 if ($is_admmod)
 {
-	if ((isset($_POST['form_sent']) && isset($_POST['silent'])) || !isset($_POST['form_sent']))
+	if (isset($_POST['silent']) || !isset($_POST['form_sent']))
 		$checkboxes[] = '<label><input type="checkbox" name="silent" value="1" tabindex="'.($cur_index++).'" checked="checked" />'.$lang_post['Silent edit'].'<br /></label>';
 	else
 		$checkboxes[] = '<label><input type="checkbox" name="silent" value="1" tabindex="'.($cur_index++).'" />'.$lang_post['Silent edit'].'<br /></label>';

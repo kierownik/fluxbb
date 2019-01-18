@@ -30,6 +30,7 @@ if (isset($_POST['add_forum']))
 		message($lang_common['Bad request'], false, '404 Not Found');
 
 	$db->query('INSERT INTO '.$db->prefix.'forums (forum_name, cat_id) VALUES(\''.$db->escape($lang_admin_forums['New forum']).'\', '.$add_to_cat.')') or error('Unable to create forum', __FILE__, __LINE__, $db->error());
+	$new_fid = $db->insert_id();
 
 	// Regenerate the quick jump cache
 	if (!defined('FORUM_CACHE_FUNCTIONS_LOADED'))
@@ -37,7 +38,7 @@ if (isset($_POST['add_forum']))
 
 	generate_quickjump_cache();
 
-	redirect('admin_forums.php', $lang_admin_forums['Forum added redirect']);
+	redirect('admin_forums.php?edit_forum='.$new_fid, $lang_admin_forums['Forum added redirect']);
 }
 
 // Delete a forum
@@ -58,15 +59,12 @@ else if (isset($_GET['del_forum']))
 
 		// Locate any "orphaned redirect topics" and delete them
 		$result = $db->query('SELECT t1.id FROM '.$db->prefix.'topics AS t1 LEFT JOIN '.$db->prefix.'topics AS t2 ON t1.moved_to=t2.id WHERE t2.id IS NULL AND t1.moved_to IS NOT NULL') or error('Unable to fetch redirect topics', __FILE__, __LINE__, $db->error());
-		$num_orphans = $db->num_rows($result);
 
-		if ($num_orphans)
-		{
-			for ($i = 0; $i < $num_orphans; ++$i)
-				$orphans[] = $db->result($result, $i);
+		while ($cur_topic = $db->fetch_assoc($result))
+			$orphans[] = $cur_topic['id'];
 
+		if (!empty($orphans))
 			$db->query('DELETE FROM '.$db->prefix.'topics WHERE id IN('.implode(',', $orphans).')') or error('Unable to delete redirect topics', __FILE__, __LINE__, $db->error());
-		}
 
 		// Delete the forum and any forum specific group permissions
 		$db->query('DELETE FROM '.$db->prefix.'forums WHERE id='.$forum_id) or error('Unable to delete forum', __FILE__, __LINE__, $db->error());
@@ -224,7 +222,7 @@ else if (isset($_GET['edit_forum']))
 
 	// Fetch forum info
 	$result = $db->query('SELECT id, forum_name, forum_desc, redirect_url, num_topics, sort_by, cat_id FROM '.$db->prefix.'forums WHERE id='.$forum_id) or error('Unable to fetch forum info', __FILE__, __LINE__, $db->error());
-	if (!$db->num_rows($result))
+	if (!$db->has_rows($result))
 		message($lang_common['Bad request'], false, '404 Not Found');
 
 	$cur_forum = $db->fetch_assoc($result);
@@ -245,7 +243,7 @@ else if (isset($_GET['edit_forum']))
 					<fieldset>
 						<legend><?php echo $lang_admin_forums['Edit details subhead'] ?></legend>
 						<div class="infldset">
-							<table class="aligntop" cellspacing="0">
+							<table class="aligntop">
 								<tr>
 									<th scope="row"><?php echo $lang_admin_forums['Forum name label'] ?></th>
 									<td><input type="text" name="forum_name" size="35" maxlength="80" value="<?php echo pun_htmlspecialchars($cur_forum['forum_name']) ?>" tabindex="1" /></td>
@@ -294,7 +292,7 @@ else if (isset($_GET['edit_forum']))
 						<legend><?php echo $lang_admin_forums['Group permissions subhead'] ?></legend>
 						<div class="infldset">
 							<p><?php printf($lang_admin_forums['Group permissions info'], '<a href="admin_groups.php">'.$lang_admin_common['User groups'].'</a>') ?></p>
-							<table id="forumperms" cellspacing="0">
+							<table id="forumperms">
 							<thead>
 								<tr>
 									<th class="atcl">&#160;</th>
@@ -371,25 +369,27 @@ generate_admin_menu('forums');
 		<h2><span><?php echo $lang_admin_forums['Add forum head'] ?></span></h2>
 		<div class="box">
 			<form method="post" action="admin_forums.php?action=adddel">
+<?php
+
+$result = $db->query('SELECT id, cat_name FROM '.$db->prefix.'categories ORDER BY disp_position') or error('Unable to fetch category list', __FILE__, __LINE__, $db->error());
+
+if ($db->has_rows($result))
+{
+
+?>
 				<div class="inform">
 					<fieldset>
 						<legend><?php echo $lang_admin_forums['Create new subhead'] ?></legend>
 						<div class="infldset">
-							<table class="aligntop" cellspacing="0">
+							<table class="aligntop">
 								<tr>
 									<th scope="row"><?php echo $lang_admin_forums['Add forum label'] ?><div><input type="submit" name="add_forum" value="<?php echo $lang_admin_forums['Add forum'] ?>" tabindex="2" /></div></th>
 									<td>
 										<select name="add_to_cat" tabindex="1">
 <?php
 
-	$result = $db->query('SELECT id, cat_name FROM '.$db->prefix.'categories ORDER BY disp_position') or error('Unable to fetch category list', __FILE__, __LINE__, $db->error());
-	if ($db->num_rows($result) > 0)
-	{
-		while ($cur_cat = $db->fetch_assoc($result))
-			echo "\t\t\t\t\t\t\t\t\t\t\t".'<option value="'.$cur_cat['id'].'">'.pun_htmlspecialchars($cur_cat['cat_name']).'</option>'."\n";
-	}
-	else
-		echo "\t\t\t\t\t\t\t\t\t\t\t".'<option value="0" disabled="disabled">'.$lang_admin_forums['No categories exist'].'</option>'."\n";
+	while ($cur_cat = $db->fetch_assoc($result))
+		echo "\t\t\t\t\t\t\t\t\t\t\t".'<option value="'.$cur_cat['id'].'">'.pun_htmlspecialchars($cur_cat['cat_name']).'</option>'."\n";
 
 ?>
 										</select>
@@ -400,6 +400,26 @@ generate_admin_menu('forums');
 						</div>
 					</fieldset>
 				</div>
+<?php
+
+}
+else
+{
+
+?>
+				<div class="inform">
+					<fieldset>
+						<legend><?php echo $lang_admin_common['None'] ?></legend>
+						<div class="infldset">
+							<p><?php echo $lang_admin_forums['No categories exist'] ?></p>
+						</div>
+					</fieldset>
+				</div>
+<?php
+
+}
+
+?>
 			</form>
 		</div>
 <?php
@@ -407,7 +427,7 @@ generate_admin_menu('forums');
 // Display all the categories and forums
 $result = $db->query('SELECT c.id AS cid, c.cat_name, f.id AS fid, f.forum_name, f.disp_position FROM '.$db->prefix.'categories AS c INNER JOIN '.$db->prefix.'forums AS f ON c.id=f.cat_id ORDER BY c.disp_position, c.id, f.disp_position') or error('Unable to fetch category/forum list', __FILE__, __LINE__, $db->error());
 
-if ($db->num_rows($result) > 0)
+if ($db->has_rows($result))
 {
 
 ?>
@@ -432,7 +452,7 @@ while ($cur_forum = $db->fetch_assoc($result))
 					<fieldset>
 						<legend><?php echo $lang_admin_forums['Category subhead'] ?> <?php echo pun_htmlspecialchars($cur_forum['cat_name']) ?></legend>
 						<div class="infldset">
-							<table cellspacing="0">
+							<table>
 							<thead>
 								<tr>
 									<th class="tcl"><?php echo $lang_admin_common['Action'] ?></th>

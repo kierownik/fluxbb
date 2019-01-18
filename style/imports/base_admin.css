@@ -1,13 +1,14 @@
 #adminconsole .block2 {margin-top: 12px}
 
 /*** Admin Main Content ***/
-* html #adstats dd {height: 1%}
 #adstats dd {margin-left: 14em; padding: 3px; margin-bottom: 5px; line-height: 1.5em}
 #adstats dt {float: left; width: 13em; padding: 3px; line-height: 1.5em}
 #adstats {padding: 15px 15px 5px 10px}
 #adintro {padding: 5px}
 #adintro p {padding: 10px}
 #adstats dl {padding: 5px 0 10px 5px}
+#adalerts {padding: 10px}
+#adalerts p {padding: 10px; background: #ffffe1; color: #000000; border: 1px solid #dfe6ee}
 
 #adminconsole fieldset td {text-align: left; padding: 4px; white-space: normal}
 #adminconsole fieldset th {text-align: left; padding: 4px; white-space: normal}

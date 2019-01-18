@@ -28,8 +28,8 @@ if (isset($_GET['ip_stats']))
 		message($lang_common['Bad request'], false, '404 Not Found');
 
 	// Fetch ip count
-	$result = $db->query('SELECT poster_ip, MAX(posted) AS last_used FROM '.$db->prefix.'posts WHERE poster_id='.$ip_stats.' GROUP BY poster_ip') or error('Unable to fetch post info', __FILE__, __LINE__, $db->error());
-	$num_ips = $db->num_rows($result);
+	$result = $db->query('SELECT COUNT(DISTINCT poster_ip) FROM '.$db->prefix.'posts WHERE poster_id='.$ip_stats) or error('Unable to fetch post info', __FILE__, __LINE__, $db->error());
+	$num_ips = $db->result($result);
 
 	// Determine the ip offset (based on $_GET['p'])
 	$num_pages = ceil($num_ips / 50);
@@ -63,7 +63,7 @@ if (isset($_GET['ip_stats']))
 	<h2><span><?php echo $lang_admin_users['Results head'] ?></span></h2>
 	<div class="box">
 		<div class="inbox">
-			<table cellspacing="0">
+			<table>
 			<thead>
 				<tr>
 					<th class="tcl" scope="col"><?php echo $lang_admin_users['Results IP address head'] ?></th>
@@ -76,7 +76,7 @@ if (isset($_GET['ip_stats']))
 <?php
 
 	$result = $db->query('SELECT poster_ip, MAX(posted) AS last_used, COUNT(id) AS used_times FROM '.$db->prefix.'posts WHERE poster_id='.$ip_stats.' GROUP BY poster_ip ORDER BY last_used DESC LIMIT '.$start_from.', 50') or error('Unable to fetch post info', __FILE__, __LINE__, $db->error());
-	if ($db->num_rows($result))
+	if ($db->has_rows($result))
 	{
 		while ($cur_ip = $db->fetch_assoc($result))
 		{
@@ -129,8 +129,8 @@ if (isset($_GET['show_users']))
 		message($lang_admin_users['Bad IP message']);
 
 	// Fetch user count
-	$result = $db->query('SELECT DISTINCT poster_id, poster FROM '.$db->prefix.'posts WHERE poster_ip=\''.$db->escape($ip).'\'') or error('Unable to fetch post info', __FILE__, __LINE__, $db->error());
-	$num_users = $db->num_rows($result);
+	$result = $db->query('SELECT COUNT(DISTINCT poster_id, poster) FROM '.$db->prefix.'posts WHERE poster_ip=\''.$db->escape($ip).'\'') or error('Unable to fetch post info', __FILE__, __LINE__, $db->error());
+	$num_users = $db->result($result);
 
 	// Determine the user offset (based on $_GET['p'])
 	$num_pages = ceil($num_users / 50);
@@ -164,7 +164,7 @@ if (isset($_GET['show_users']))
 	<h2><span><?php echo $lang_admin_users['Results head'] ?></span></h2>
 	<div class="box">
 		<div class="inbox">
-			<table cellspacing="0">
+			<table>
 			<thead>
 				<tr>
 					<th class="tcl" scope="col"><?php echo $lang_admin_users['Results username head'] ?></th>
@@ -179,17 +179,16 @@ if (isset($_GET['show_users']))
 <?php
 
 	$result = $db->query('SELECT DISTINCT poster_id, poster FROM '.$db->prefix.'posts WHERE poster_ip=\''.$db->escape($ip).'\' ORDER BY poster ASC LIMIT '.$start_from.', 50') or error('Unable to fetch post info', __FILE__, __LINE__, $db->error());
-	$num_posts = $db->num_rows($result);
 
-	if ($num_posts)
+	$posters = $poster_ids = array();
+	while ($cur_poster = $db->fetch_assoc($result))
 	{
-		$posters = $poster_ids = array();
-		while ($cur_poster = $db->fetch_assoc($result))
-		{
-			$posters[] = $cur_poster;
-			$poster_ids[] = $cur_poster['poster_id'];
-		}
+		$posters[] = $cur_poster;
+		$poster_ids[] = $cur_poster['poster_id'];
+	}
 
+	if (!empty($posters))
+	{
 		$result = $db->query('SELECT u.id, u.username, u.email, u.title, u.num_posts, u.admin_note, g.g_id, g.g_user_title FROM '.$db->prefix.'users AS u INNER JOIN '.$db->prefix.'groups AS g ON g.g_id=u.group_id WHERE u.id>1 AND u.id IN('.implode(',', $poster_ids).')') or error('Unable to fetch user info', __FILE__, __LINE__, $db->error());
 
 		$user_data = array();
@@ -361,7 +360,7 @@ else if (isset($_POST['move_users']) || isset($_POST['move_users_comply']))
 					<fieldset>
 						<legend><?php echo $lang_admin_users['Move users subhead'] ?></legend>
 						<div class="infldset">
-							<table class="aligntop" cellspacing="0">
+							<table class="aligntop">
 								<tr>
 									<th scope="row"><?php echo $lang_admin_users['New group label'] ?></th>
 									<td>
@@ -465,7 +464,7 @@ else if (isset($_POST['delete_users']) || isset($_POST['delete_users_comply']))
 
 			// Find all posts made by this user
 			$result = $db->query('SELECT p.id, p.topic_id, t.forum_id FROM '.$db->prefix.'posts AS p INNER JOIN '.$db->prefix.'topics AS t ON t.id=p.topic_id INNER JOIN '.$db->prefix.'forums AS f ON f.id=t.forum_id WHERE p.poster_id IN ('.implode(',', $user_ids).')') or error('Unable to fetch posts', __FILE__, __LINE__, $db->error());
-			if ($db->num_rows($result))
+			if ($db->has_rows($result))
 			{
 				while ($cur_post = $db->fetch_assoc($result))
 				{
@@ -643,7 +642,7 @@ else if (isset($_POST['ban_users']) || isset($_POST['ban_users_comply']))
 					<fieldset>
 						<legend><?php echo $lang_admin_users['Message expiry subhead'] ?></legend>
 						<div class="infldset">
-							<table class="aligntop" cellspacing="0">
+							<table class="aligntop">
 								<tr>
 									<th scope="row"><?php echo $lang_admin_users['Ban message label'] ?></th>
 									<td>
@@ -776,7 +775,7 @@ else if (isset($_GET['find_user']))
 	{
 		if ($input != '' && in_array($key, array('username', 'email', 'title', 'realname', 'url', 'jabber', 'icq', 'msn', 'aim', 'yahoo', 'location', 'signature', 'admin_note')))
 		{
-			$conditions[] = 'u.'.$db->escape($key).' '.$like_command.' \''.$db->escape(str_replace('*', '%', $input)).'\'';
+			$conditions[] = 'u.'.$db->escape($key).' '.$like_command.' \''.$db->escape(str_replace(array('*', '_'), array('%', '\\_'), $input)).'\'';
 			$query_str[] = 'form%5B'.$key.'%5D='.urlencode($input);
 		}
 	}
@@ -839,7 +838,7 @@ else if (isset($_GET['find_user']))
 	<h2><span><?php echo $lang_admin_users['Results head'] ?></span></h2>
 	<div class="box">
 		<div class="inbox">
-			<table cellspacing="0">
+			<table>
 			<thead>
 				<tr>
 					<th class="tcl" scope="col"><?php echo $lang_admin_users['Results username head'] ?></th>
@@ -856,7 +855,7 @@ else if (isset($_GET['find_user']))
 <?php
 
 	$result = $db->query('SELECT u.id, u.username, u.email, u.title, u.num_posts, u.admin_note, g.g_id, g.g_user_title FROM '.$db->prefix.'users AS u LEFT JOIN '.$db->prefix.'groups AS g ON g.g_id=u.group_id WHERE u.id>1'.(!empty($conditions) ? ' AND '.implode(' AND ', $conditions) : '').' ORDER BY '.$db->escape($order_by).' '.$db->escape($direction).' LIMIT '.$start_from.', 50') or error('Unable to fetch user info', __FILE__, __LINE__, $db->error());
-	if ($db->num_rows($result))
+	if ($db->has_rows($result))
 	{
 		while ($user_data = $db->fetch_assoc($result))
 		{
@@ -935,7 +934,7 @@ else
 						<legend><?php echo $lang_admin_users['User search subhead'] ?></legend>
 						<div class="infldset">
 							<p><?php echo $lang_admin_users['User search info'] ?></p>
-							<table class="aligntop" cellspacing="0">
+							<table class="aligntop">
 								<tr>
 									<th scope="row"><?php echo $lang_admin_users['Username label'] ?></th>
 									<td><input type="text" name="form[username]" size="25" maxlength="25" tabindex="2" /></td>
@@ -1074,7 +1073,7 @@ else
 					<fieldset>
 						<legend><?php echo $lang_admin_users['IP search subhead'] ?></legend>
 						<div class="infldset">
-							<table class="aligntop" cellspacing="0">
+							<table class="aligntop">
 								<tr>
 									<th scope="row"><?php echo $lang_admin_users['IP address label'] ?><div><input type="submit" value="<?php echo $lang_admin_users['Find IP address'] ?>" tabindex="26" /></div></th>
 									<td><input type="text" name="show_users" size="18" maxlength="15" tabindex="24" />

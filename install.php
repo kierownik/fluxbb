@@ -7,14 +7,14 @@
  */
 
 // The FluxBB version this script installs
-define('FORUM_VERSION', '1.5.4');
+define('FORUM_VERSION', '1.5.11');
 
-define('FORUM_DB_REVISION', 20);
+define('FORUM_DB_REVISION', 23);
 define('FORUM_SI_REVISION', 2);
 define('FORUM_PARSER_REVISION', 2);
 
-define('MIN_PHP_VERSION', '4.4.0');
-define('MIN_MYSQL_VERSION', '4.1.2');
+define('MIN_PHP_VERSION', '5.6.4');
+define('MIN_MYSQL_VERSION', '5.0.6');
 define('MIN_PGSQL_VERSION', '7.0.0');
 define('PUN_SEARCH_MIN_WORD', 3);
 define('PUN_SEARCH_MAX_WORD', 20);
@@ -34,32 +34,11 @@ require PUN_ROOT.'include/utf8/utf8.php';
 // Strip out "bad" UTF-8 characters
 forum_remove_bad_characters();
 
-// Reverse the effect of register_globals
-forum_unregister_globals();
-
 // Disable error reporting for uninitialized variables
 error_reporting(E_ALL);
 
 // Force POSIX locale (to prevent functions such as strtolower() from messing up UTF-8 strings)
 setlocale(LC_CTYPE, 'C');
-
-// Turn off magic_quotes_runtime
-if (get_magic_quotes_runtime())
-	set_magic_quotes_runtime(0);
-
-// Strip slashes from GET/POST/COOKIE (if magic_quotes_gpc is enabled)
-if (get_magic_quotes_gpc())
-{
-	function stripslashes_array($array)
-	{
-		return is_array($array) ? array_map('stripslashes_array', $array) : stripslashes($array);
-	}
-
-	$_GET = stripslashes_array($_GET);
-	$_POST = stripslashes_array($_POST);
-	$_COOKIE = stripslashes_array($_COOKIE);
-	$_REQUEST = stripslashes_array($_REQUEST);
-}
 
 // Turn off PHP time limit
 @set_time_limit(0);
@@ -67,6 +46,9 @@ if (get_magic_quotes_gpc())
 
 // If we've been passed a default language, use it
 $install_lang = isset($_REQUEST['install_lang']) ? pun_trim($_REQUEST['install_lang']) : 'English';
+
+// Make sure we got a valid language string
+$install_lang = preg_replace('%[\.\\\/]%', '', $install_lang);
 
 // If such a language pack doesn't exist, or isn't up-to-date enough to translate this page, default to English
 if (!file_exists(PUN_ROOT.'lang/'.$install_lang.'/install.php'))
@@ -107,7 +89,7 @@ function generate_config_file()
 {
 	global $db_type, $db_host, $db_name, $db_username, $db_password, $db_prefix, $cookie_name, $cookie_seed;
 
-	return '<?php'."\n\n".'$db_type = \''.$db_type."';\n".'$db_host = \''.$db_host."';\n".'$db_name = \''.addslashes($db_name)."';\n".'$db_username = \''.addslashes($db_username)."';\n".'$db_password = \''.addslashes($db_password)."';\n".'$db_prefix = \''.addslashes($db_prefix)."';\n".'$p_connect = false;'."\n\n".'$cookie_name = '."'".$cookie_name."';\n".'$cookie_domain = '."'';\n".'$cookie_path = '."'/';\n".'$cookie_secure = 0;'."\n".'$cookie_seed = \''.random_key(16, false, true)."';\n\ndefine('PUN', 1);\n";
+	return '<?php'."\n\n".'$db_type = \''.$db_type."';\n".'$db_host = \''.$db_host."';\n".'$db_name = \''.addslashes($db_name)."';\n".'$db_username = \''.addslashes($db_username)."';\n".'$db_password = \''.addslashes($db_password)."';\n".'$db_prefix = \''.addslashes($db_prefix)."';\n".'$p_connect = false;'."\n\n".'$cookie_name = '."'".$cookie_name."';\n".'$cookie_domain = '."'';\n".'$cookie_path = '."'/';\n".'$cookie_secure = 0;'."\n".'$cookie_seed = \''.random_key(16, false, true)."';\n\n".'$password_hash_cost = 10;'."\n\ndefine('PUN', 1);\n";
 }
 
 
@@ -184,7 +166,7 @@ else
 	else if (preg_match('%(?:\[/?(?:b|u|i|h|colou?r|quote|code|img|url|email|list)\]|\[(?:code|quote|list)=)%i', $username))
 		$alerts[] = $lang_install['Username 6'];
 
-	if (pun_strlen($password1) < 4)
+	if (pun_strlen($password1) < 9)
 		$alerts[] = $lang_install['Short password'];
 	else if ($password1 != $password2)
 		$alerts[] = $lang_install['Passwords not match'];
@@ -218,7 +200,6 @@ if (!forum_is_writable(PUN_ROOT.'img/avatars/'))
 if (!isset($_POST['form_sent']) || !empty($alerts))
 {
 	// Determine available database extensions
-	$dual_mysql = false;
 	$db_extensions = array();
 	$mysql_innodb = false;
 	if (function_exists('mysqli_connect'))
@@ -226,15 +207,6 @@ if (!isset($_POST['form_sent']) || !empty($alerts))
 		$db_extensions[] = array('mysqli', 'MySQL Improved');
 		$db_extensions[] = array('mysqli_innodb', 'MySQL Improved (InnoDB)');
 		$mysql_innodb = true;
-	}
-	if (function_exists('mysql_connect'))
-	{
-		$db_extensions[] = array('mysql', 'MySQL Standard');
-		$db_extensions[] = array('mysql_innodb', 'MySQL Standard (InnoDB)');
-		$mysql_innodb = true;
-
-		if (count($db_extensions) > 2)
-			$dual_mysql = true;
 	}
 	if (function_exists('sqlite_open'))
 		$db_extensions[] = array('sqlite', 'SQLite');
@@ -253,7 +225,7 @@ if (!isset($_POST['form_sent']) || !empty($alerts))
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
 <title><?php echo $lang_install['FluxBB Installation'] ?></title>
-<link rel="stylesheet" type="text/css" href="style/<?php echo $default_style ?>.css" />
+<link rel="stylesheet" type="text/css" href="style/<?php echo pun_htmlspecialchars($default_style) ?>.css" />
 <script type="text/javascript">
 /* <![CDATA[ */
 function process_form(the_form)
@@ -263,8 +235,8 @@ function process_form(the_form)
 		"req_db_host": "<?php echo $lang_install['Database server hostname'] ?>",
 		"req_db_name": "<?php echo $lang_install['Database name'] ?>",
 		"req_username": "<?php echo $lang_install['Administrator username'] ?>",
-		"req_password1": "<?php echo $lang_install['Administrator password 1'] ?>",
-		"req_password2": "<?php echo $lang_install['Administrator password 2'] ?>",
+		"req_password1": "<?php echo $lang_install['Password'] ?>",
+		"req_password2": "<?php echo $lang_install['Confirm password'] ?>",
 		"req_email": "<?php echo $lang_install['Administrator email'] ?>",
 		"req_title": "<?php echo $lang_install['Board title'] ?>",
 		"req_base_url": "<?php echo $lang_install['Base URL'] ?>"
@@ -502,39 +474,32 @@ foreach ($alerts as $cur_alert)
 }
 else
 {
-	// Load the appropriate DB layer class
+	// Load and create the appropriate DB adapter (and open/connect to/select db)
 	switch ($db_type)
 	{
-		case 'mysql':
-			require PUN_ROOT.'include/dblayer/mysql.php';
-			break;
-
-		case 'mysql_innodb':
-			require PUN_ROOT.'include/dblayer/mysql_innodb.php';
-			break;
-
 		case 'mysqli':
 			require PUN_ROOT.'include/dblayer/mysqli.php';
+			$db = new MysqlDBLayer($db_host, $db_username, $db_password, $db_name, $db_prefix, false);
 			break;
 
 		case 'mysqli_innodb':
 			require PUN_ROOT.'include/dblayer/mysqli_innodb.php';
+			$db = new MysqlInnodbDBLayer($db_host, $db_username, $db_password, $db_name, $db_prefix, false);
 			break;
 
 		case 'pgsql':
 			require PUN_ROOT.'include/dblayer/pgsql.php';
+			$db = new PgsqlDBLayer($db_host, $db_username, $db_password, $db_name, $db_prefix, false);
 			break;
 
 		case 'sqlite':
 			require PUN_ROOT.'include/dblayer/sqlite.php';
+			$db = new SqliteDBLayer($db_name, $db_prefix, false);
 			break;
 
 		default:
-			error(sprintf($lang_install['DB type not valid'], pun_htmlspecialchars($db_type)));
+			error(sprintf($lang_install['DB type not valid'], $db_type));
 	}
-
-	// Create the database object (and connect/select db)
-	$db = new DBLayer($db_host, $db_username, $db_password, $db_name, $db_prefix, false);
 
 	// Validate prefix
 	if (strlen($db_prefix) > 0 && (!preg_match('%^[a-zA-Z_][a-zA-Z0-9_]*$%', $db_prefix) || strlen($db_prefix) > 40))
@@ -543,9 +508,7 @@ else
 	// Do some DB type specific checks
 	switch ($db_type)
 	{
-		case 'mysql':
 		case 'mysqli':
-		case 'mysql_innodb':
 		case 'mysqli_innodb':
 			$mysql_info = $db->get_version();
 			if (version_compare($mysql_info['version'], MIN_MYSQL_VERSION, '<'))
@@ -567,15 +530,15 @@ else
 
 	// Make sure FluxBB isn't already installed
 	$result = $db->query('SELECT 1 FROM '.$db_prefix.'users WHERE id=1');
-	if ($db->num_rows($result))
+	if ($db->has_rows($result))
 		error(sprintf($lang_install['Existing table error'], $db_prefix, $db_name));
 
 	// Check if InnoDB is available
-	if ($db_type == 'mysql_innodb' || $db_type == 'mysqli_innodb')
+	if ($db_type == 'mysqli_innodb')
 	{
-		$result = $db->query('SHOW VARIABLES LIKE \'have_innodb\'');
-		list (, $result) = $db->fetch_row($result);
-		if ((strtoupper($result) != 'YES'))
+		$result = $db->query('SELECT SUPPORT FROM INFORMATION_SCHEMA.ENGINES WHERE ENGINE=\'InnoDB\'');
+		$result = $db->result($result);
+		if (!in_array($result, array('YES', 'DEFAULT')))
 			error($lang_install['InnoDB off']);
 	}
 
@@ -623,7 +586,7 @@ else
 		)
 	);
 
-	if ($db_type == 'mysql' || $db_type == 'mysqli' || $db_type == 'mysql_innodb' || $db_type == 'mysqli_innodb')
+	if ($db_type == 'mysqli' || $db_type == 'mysqli_innodb')
 		$schema['INDEXES']['username_idx'] = array('username(25)');
 
 	$db->create_table('bans', $schema) or error('Unable to create bans table', __FILE__, __LINE__, $db->error());
@@ -844,6 +807,11 @@ else
 				'allow_null'	=> false,
 				'default'		=> '0'
 			),
+			'g_mod_promote_users'			=> array(
+				'datatype'		=> 'TINYINT(1)',
+				'allow_null'	=> false,
+				'default'		=> '0'
+			),
 			'g_read_board'				=> array(
 				'datatype'		=> 'TINYINT(1)',
 				'allow_null'	=> false,
@@ -971,13 +939,13 @@ else
 		)
 	);
 
-	if ($db_type == 'mysql' || $db_type == 'mysqli' || $db_type == 'mysql_innodb' || $db_type == 'mysqli_innodb')
+	if ($db_type == 'mysqli' || $db_type == 'mysqli_innodb')
 	{
 		$schema['UNIQUE KEYS']['user_id_ident_idx'] = array('user_id', 'ident(25)');
 		$schema['INDEXES']['ident_idx'] = array('ident(25)');
 	}
 
-	if ($db_type == 'mysql_innodb' || $db_type == 'mysqli_innodb')
+	if ($db_type == 'mysqli_innodb')
 		$schema['ENGINE'] = 'InnoDB';
 
 	$db->create_table('online', $schema) or error('Unable to create online table', __FILE__, __LINE__, $db->error());
@@ -1121,7 +1089,7 @@ else
 		)
 	);
 
-	if ($db_type == 'mysql' || $db_type == 'mysqli' || $db_type == 'mysql_innodb' || $db_type == 'mysqli_innodb')
+	if ($db_type == 'mysqli' || $db_type == 'mysqli_innodb')
 		$schema['INDEXES']['ident_idx'] = array('ident(8)');
 
 	$db->create_table('search_cache', $schema) or error('Unable to create search_cache table', __FILE__, __LINE__, $db->error());
@@ -1319,7 +1287,7 @@ else
 				'default'		=> '\'\''
 			),
 			'password'			=> array(
-				'datatype'		=> 'VARCHAR(40)',
+				'datatype'		=> 'VARCHAR(255)',
 				'allow_null'	=> false,
 				'default'		=> '\'\''
 			),
@@ -1504,7 +1472,7 @@ else
 		)
 	);
 
-	if ($db_type == 'mysql' || $db_type == 'mysqli' || $db_type == 'mysql_innodb' || $db_type == 'mysqli_innodb')
+	if ($db_type == 'mysqli' || $db_type == 'mysqli_innodb')
 		$schema['UNIQUE KEYS']['username_idx'] = array('username(25)');
 
 	$db->create_table('users', $schema) or error('Unable to create users table', __FILE__, __LINE__, $db->error());
@@ -1515,7 +1483,7 @@ else
 	// Insert the four preset groups
 	$db->query('INSERT INTO '.$db->prefix.'groups ('.($db_type != 'pgsql' ? 'g_id, ' : '').'g_title, g_user_title, g_moderator, g_mod_edit_users, g_mod_rename_users, g_mod_change_passwords, g_mod_ban_users, g_read_board, g_view_users, g_post_replies, g_post_topics, g_edit_posts, g_delete_posts, g_delete_topics, g_set_title, g_search, g_search_users, g_send_email, g_post_flood, g_search_flood, g_email_flood, g_report_flood) VALUES('.($db_type != 'pgsql' ? '1, ' : '').'\''.$db->escape($lang_install['Administrators']).'\', \''.$db->escape($lang_install['Administrator']).'\', 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0)') or error('Unable to add group', __FILE__, __LINE__, $db->error());
 
-	$db->query('INSERT INTO '.$db->prefix.'groups ('.($db_type != 'pgsql' ? 'g_id, ' : '').'g_title, g_user_title, g_moderator, g_mod_edit_users, g_mod_rename_users, g_mod_change_passwords, g_mod_ban_users, g_read_board, g_view_users, g_post_replies, g_post_topics, g_edit_posts, g_delete_posts, g_delete_topics, g_set_title, g_search, g_search_users, g_send_email, g_post_flood, g_search_flood, g_email_flood, g_report_flood) VALUES('.($db_type != 'pgsql' ? '2, ' : '').'\''.$db->escape($lang_install['Moderators']).'\', \''.$db->escape($lang_install['Moderator']).'\', 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0)') or error('Unable to add group', __FILE__, __LINE__, $db->error());
+	$db->query('INSERT INTO '.$db->prefix.'groups ('.($db_type != 'pgsql' ? 'g_id, ' : '').'g_title, g_user_title, g_moderator, g_mod_edit_users, g_mod_rename_users, g_mod_change_passwords, g_mod_ban_users, g_mod_promote_users, g_read_board, g_view_users, g_post_replies, g_post_topics, g_edit_posts, g_delete_posts, g_delete_topics, g_set_title, g_search, g_search_users, g_send_email, g_post_flood, g_search_flood, g_email_flood, g_report_flood) VALUES('.($db_type != 'pgsql' ? '2, ' : '').'\''.$db->escape($lang_install['Moderators']).'\', \''.$db->escape($lang_install['Moderator']).'\', 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0)') or error('Unable to add group', __FILE__, __LINE__, $db->error());
 
 	$db->query('INSERT INTO '.$db->prefix.'groups ('.($db_type != 'pgsql' ? 'g_id, ' : '').'g_title, g_user_title, g_moderator, g_mod_edit_users, g_mod_rename_users, g_mod_change_passwords, g_mod_ban_users, g_read_board, g_view_users, g_post_replies, g_post_topics, g_edit_posts, g_delete_posts, g_delete_topics, g_set_title, g_search, g_search_users, g_send_email, g_post_flood, g_search_flood, g_email_flood, g_report_flood) VALUES('.($db_type != 'pgsql' ? '3, ' : '').'\''.$db->escape($lang_install['Guests']).'\', NULL, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 60, 30, 0, 0)') or error('Unable to add group', __FILE__, __LINE__, $db->error());
 
@@ -1525,7 +1493,8 @@ else
 	$db->query('INSERT INTO '.$db_prefix.'users (group_id, username, password, email) VALUES(3, \''.$db->escape($lang_install['Guest']).'\', \''.$db->escape($lang_install['Guest']).'\', \''.$db->escape($lang_install['Guest']).'\')')
 		or error('Unable to add guest user. Please check your configuration and try again', __FILE__, __LINE__, $db->error());
 
-	$db->query('INSERT INTO '.$db_prefix.'users (group_id, username, password, email, language, style, num_posts, last_post, registered, registration_ip, last_visit) VALUES(1, \''.$db->escape($username).'\', \''.pun_hash($password1).'\', \''.$email.'\', \''.$db->escape($default_lang).'\', \''.$db->escape($default_style).'\', 1, '.$now.', '.$now.', \''.$db->escape(get_remote_address()).'\', '.$now.')')
+	$password_hash_cost = 10;
+	$db->query('INSERT INTO '.$db_prefix.'users (group_id, username, password, email, language, style, num_posts, last_post, registered, registration_ip, last_visit) VALUES(1, \''.$db->escape($username).'\', \''.$db->escape(flux_password_hash($password1)).'\', \''.$email.'\', \''.$db->escape($default_lang).'\', \''.$db->escape($default_style).'\', 1, '.$now.', '.$now.', \''.$db->escape(get_remote_address()).'\', '.$now.')')
 		or error('Unable to add administrator user. Please check your configuration and try again', __FILE__, __LINE__, $db->error());
 
 	// Enable/disable avatars depending on file_uploads setting in PHP configuration
@@ -1675,7 +1644,7 @@ else
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
 <title><?php echo $lang_install['FluxBB Installation'] ?></title>
-<link rel="stylesheet" type="text/css" href="style/<?php echo $default_style ?>.css" />
+<link rel="stylesheet" type="text/css" href="style/<?php echo pun_htmlspecialchars($default_style) ?>.css" />
 </head>
 <body>
 
@@ -1710,8 +1679,8 @@ if (!$written)
 					<p><?php echo $lang_install['Info 18'] ?></p>
 				</div>
 				<input type="hidden" name="generate_config" value="1" />
-				<input type="hidden" name="db_type" value="<?php echo $db_type; ?>" />
-				<input type="hidden" name="db_host" value="<?php echo $db_host; ?>" />
+				<input type="hidden" name="db_type" value="<?php echo pun_htmlspecialchars($db_type); ?>" />
+				<input type="hidden" name="db_host" value="<?php echo pun_htmlspecialchars($db_host); ?>" />
 				<input type="hidden" name="db_name" value="<?php echo pun_htmlspecialchars($db_name); ?>" />
 				<input type="hidden" name="db_username" value="<?php echo pun_htmlspecialchars($db_username); ?>" />
 				<input type="hidden" name="db_password" value="<?php echo pun_htmlspecialchars($db_password); ?>" />

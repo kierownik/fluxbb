@@ -65,10 +65,12 @@ $errors = array();
 
 if (isset($_POST['form_sent']))
 {
+	flux_hook('register_before_validation');
+
 	// Check that someone from this IP didn't register a user within the last hour (DoS prevention)
 	$result = $db->query('SELECT 1 FROM '.$db->prefix.'users WHERE registration_ip=\''.$db->escape(get_remote_address()).'\' AND registered>'.(time() - 3600)) or error('Unable to fetch user info', __FILE__, __LINE__, $db->error());
 
-	if ($db->num_rows($result))
+	if ($db->has_rows($result))
 		message($lang_register['Registration flood']);
 
 
@@ -79,7 +81,7 @@ if (isset($_POST['form_sent']))
 	{
 		$email2 = strtolower(pun_trim($_POST['req_email2']));
 
-		$password1 = random_pass(8);
+		$password1 = random_pass(12);
 		$password2 = $password1;
 	}
 	else
@@ -91,7 +93,7 @@ if (isset($_POST['form_sent']))
 	// Validate username and passwords
 	check_username($username);
 
-	if (pun_strlen($password1) < 4)
+	if (pun_strlen($password1) < 9)
 		$errors[] = $lang_prof_reg['Pass too short'];
 	else if ($password1 != $password2)
 		$errors[] = $lang_prof_reg['Pass not match'];
@@ -119,7 +121,7 @@ if (isset($_POST['form_sent']))
 	$dupe_list = array();
 
 	$result = $db->query('SELECT username FROM '.$db->prefix.'users WHERE email=\''.$db->escape($email1).'\'') or error('Unable to fetch user info', __FILE__, __LINE__, $db->error());
-	if ($db->num_rows($result))
+	if ($db->has_rows($result))
 	{
 		if ($pun_config['p_allow_dupe_email'] == '0')
 			$errors[] = $lang_prof_reg['Dupe email'];
@@ -146,6 +148,8 @@ if (isset($_POST['form_sent']))
 	if ($email_setting < 0 || $email_setting > 2)
 		$email_setting = $pun_config['o_default_email_setting'];
 
+	flux_hook('register_after_validation');
+
 	// Did everything go according to plan?
 	if (empty($errors))
 	{
@@ -153,10 +157,10 @@ if (isset($_POST['form_sent']))
 		$now = time();
 
 		$intial_group_id = ($pun_config['o_regs_verify'] == '0') ? $pun_config['o_default_user_group'] : PUN_UNVERIFIED;
-		$password_hash = pun_hash($password1);
+		$password_hash = flux_password_hash($password1);
 
 		// Add the user
-		$db->query('INSERT INTO '.$db->prefix.'users (username, group_id, password, email, email_setting, timezone, dst, language, style, registered, registration_ip, last_visit) VALUES(\''.$db->escape($username).'\', '.$intial_group_id.', \''.$password_hash.'\', \''.$db->escape($email1).'\', '.$email_setting.', '.$timezone.' , '.$dst.', \''.$db->escape($language).'\', \''.$pun_config['o_default_style'].'\', '.$now.', \''.$db->escape(get_remote_address()).'\', '.$now.')') or error('Unable to create user', __FILE__, __LINE__, $db->error());
+		$db->query('INSERT INTO '.$db->prefix.'users (username, group_id, password, email, email_setting, timezone, dst, language, style, registered, registration_ip, last_visit) VALUES(\''.$db->escape($username).'\', '.$intial_group_id.', \''.$db->escape($password_hash).'\', \''.$db->escape($email1).'\', '.$email_setting.', '.$timezone.' , '.$dst.', \''.$db->escape($language).'\', \''.$pun_config['o_default_style'].'\', '.$now.', \''.$db->escape(get_remote_address()).'\', '.$now.')') or error('Unable to create user', __FILE__, __LINE__, $db->error());
 		$new_uid = $db->insert_id();
 
 		if ($pun_config['o_regs_verify'] == '0')
@@ -223,6 +227,7 @@ if (isset($_POST['form_sent']))
 				$mail_message = str_replace('<username>', $username, $mail_message);
 				$mail_message = str_replace('<base_url>', get_base_url().'/', $mail_message);
 				$mail_message = str_replace('<profile_url>', get_base_url().'/profile.php?id='.$new_uid, $mail_message);
+				$mail_message = str_replace('<admin_url>', get_base_url().'/profile.php?section=admin&id='.$new_uid, $mail_message);
 				$mail_message = str_replace('<board_mailer>', $pun_config['o_board_title'], $mail_message);
 
 				pun_mail($pun_config['o_mailing_list'], $mail_subject, $mail_message);
@@ -262,6 +267,9 @@ if (isset($_POST['form_sent']))
 $page_title = array(pun_htmlspecialchars($pun_config['o_board_title']), $lang_register['Register']);
 $required_fields = array('req_user' => $lang_common['Username'], 'req_password1' => $lang_common['Password'], 'req_password2' => $lang_prof_reg['Confirm pass'], 'req_email1' => $lang_common['Email'], 'req_email2' => $lang_common['Email'].' 2');
 $focus_element = array('register', 'req_user');
+
+flux_hook('register_before_header');
+
 define('PUN_ACTIVE_PAGE', 'register');
 require PUN_ROOT.'header.php';
 
@@ -430,6 +438,7 @@ if (!empty($errors))
 					</div>
 				</fieldset>
 			</div>
+<?php flux_hook('register_before_submit'); ?>
 			<p class="buttons"><input type="submit" name="register" value="<?php echo $lang_register['Register'] ?>" /></p>
 		</form>
 	</div>

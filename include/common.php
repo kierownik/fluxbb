@@ -10,9 +10,9 @@ if (!defined('PUN_ROOT'))
 	exit('The constant PUN_ROOT must be defined and point to a valid FluxBB installation root directory.');
 
 // Define the version and database revision that this code was written for
-define('FORUM_VERSION', '1.5.4');
+define('FORUM_VERSION', '1.5.11');
 
-define('FORUM_DB_REVISION', 20);
+define('FORUM_DB_REVISION', 23);
 define('FORUM_SI_REVISION', 2);
 define('FORUM_PARSER_REVISION', 2);
 
@@ -38,18 +38,6 @@ if (file_exists(PUN_ROOT.'config.php'))
 if (defined('FORUM'))
 	define('PUN', FORUM);
 
-// Load the functions script
-require PUN_ROOT.'include/functions.php';
-
-// Load UTF-8 functions
-require PUN_ROOT.'include/utf8/utf8.php';
-
-// Strip out "bad" UTF-8 characters
-forum_remove_bad_characters();
-
-// Reverse the effect of register_globals
-forum_unregister_globals();
-
 // If PUN isn't defined, config.php is missing or corrupt
 if (!defined('PUN'))
 {
@@ -57,39 +45,28 @@ if (!defined('PUN'))
 	exit;
 }
 
-// Record the start time (will be used to calculate the generation time for the page)
-$pun_start = get_microtime();
+// Load the functions script
+require PUN_ROOT.'include/functions.php';
 
+// Load addon functionality
+require PUN_ROOT.'include/addons.php';
+
+// Load UTF-8 functions
+require PUN_ROOT.'include/utf8/utf8.php';
+
+// Strip out "bad" UTF-8 characters
+forum_remove_bad_characters();
+
+// The addon manager is responsible for storing the hook listeners and communicating with the addons
+$flux_addons = new flux_addon_manager();
+
+// Seed the random number generator for systems where this does not happen automatically
+mt_srand();
 // Make sure PHP reports all errors except E_NOTICE. FluxBB supports E_ALL, but a lot of scripts it may interact with, do not
 error_reporting(E_ALL ^ E_NOTICE);
 
 // Force POSIX locale (to prevent functions such as strtolower() from messing up UTF-8 strings)
 setlocale(LC_CTYPE, 'C');
-
-// Turn off magic_quotes_runtime
-if (get_magic_quotes_runtime())
-	set_magic_quotes_runtime(0);
-
-// Strip slashes from GET/POST/COOKIE/REQUEST/FILES (if magic_quotes_gpc is enabled)
-if (!defined('FORUM_DISABLE_STRIPSLASHES') && get_magic_quotes_gpc())
-{
-	function stripslashes_array($array)
-	{
-		return is_array($array) ? array_map('stripslashes_array', $array) : stripslashes($array);
-	}
-
-	$_GET = stripslashes_array($_GET);
-	$_POST = stripslashes_array($_POST);
-	$_COOKIE = stripslashes_array($_COOKIE);
-	$_REQUEST = stripslashes_array($_REQUEST);
-	if (is_array($_FILES))
-	{
-		// Don't strip valid slashes from tmp_name path on Windows
-		foreach ($_FILES AS $key => $value)
-			$_FILES[$key]['tmp_name'] = str_replace('\\', '\\\\', $value['tmp_name']);
-		$_FILES = stripslashes_array($_FILES);
-	}
-}
 
 // If a cookie name is not specified in config.php, we use the default (pun_cookie)
 if (empty($cookie_name))
